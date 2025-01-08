@@ -9,12 +9,33 @@ import xml.etree.ElementTree as ET
 from ftplib import FTP
 from time import sleep
 
-# Filenames
-identity_filename = "providerinfo.xml"  # Hardcoded requirement
+# Batching vars
+page_size = 15000
 resource_filename_no_extension = "eschol_linkout_resource"
 
-# Batching vars
-page_size = 1000
+
+# =========================
+# Get Connections
+def get_eschol_db_connection(env):
+    mysql_conn = pymysql.connect(
+        host=env['ESCHOL_DB_SERVER_PROD'],
+        user=env['ESCHOL_DB_USER_PROD'],
+        password=env['ESCHOL_DB_PASSWORD_PROD'],
+        database=env['ESCHOL_DB_DATABASE_PROD'],
+        cursorclass=pymysql.cursors.DictCursor)
+
+    return mysql_conn
+
+
+def get_logging_db_connection(env):
+    mysql_conn = pymysql.connect(
+        host=env['LOGGING_DB_SERVER'],
+        user=env['LOGGING_DB_USER'],
+        password=env['LOGGING_DB_PASSWORD'],
+        database=env['LOGGING_DB_DATABASE'],
+        cursorclass=pymysql.cursors.DictCursor)
+
+    return mysql_conn
 
 
 # =========================
@@ -28,8 +49,11 @@ def main():
     output_dir = f"output/{run_time}-pubmed-linkout-files"
     os.mkdir(f"./{output_dir}")
 
+    # Gets the pubs we've already sent
+    submitted_ids = get_previous_pubmed_submissions(env)
+
     # Get pubs w/ pmids in eScholarship
-    eschol_pmid_pubs = get_eschol_pmid_pubs(env)
+    eschol_pmid_pubs = get_eschol_pmid_pubs(env, submitted_ids)
     eschol_pmid_pubs_pages = list(chunk_into_n(eschol_pmid_pubs, page_size))
 
     # TK check against what we already have
@@ -38,12 +62,15 @@ def main():
     print("Processing paginated files:")
     resource_xml_files = []
     for page_number, eschol_page in enumerate(eschol_pmid_pubs_pages):
-        resource_xml_file = create_resource_xml(eschol_page, output_dir, page_number)
+        resource_xml_file = create_resource_xml(eschol_page, output_dir, page_number, run_time)
         resource_xml_files.append(resource_xml_file)
 
     # Upload resource to PMID FTP
     sleep(10)
     upload_xml_files_to_ftp(resource_xml_files, env)
+
+    # Update logging db
+    update_logging_db(env, eschol_pmid_pubs)
 
 
 # =========================
@@ -54,19 +81,35 @@ def chunk_into_n(full_list, n):
 
 
 # =========================
-def get_eschol_pmid_pubs(env, ):
-
-    # connect to the mySql db
-    mysql_conn = pymysql.connect(
-        host=env['ESCHOL_DB_SERVER_PROD'],
-        user=env['ESCHOL_DB_USER_PROD'],
-        password=env['ESCHOL_DB_PASSWORD_PROD'],
-        database=env['ESCHOL_DB_DATABASE_PROD'],
-        cursorclass=pymysql.cursors.DictCursor)
+def get_previous_pubmed_submissions(env):
+    mysql_conn = get_logging_db_connection(env)
 
     # Query for items w/ PMIDs
-    eschol_sql = """
-        SELECT id as `eschol_id`, json_t.*
+    logging_sql = "SELECT item_id FROM linkout_items"
+
+    with mysql_conn.cursor() as cursor:
+        print("Connected to the logging DB. Collecting previously-submitted IDs.")
+        cursor.execute(logging_sql)
+        submitted_pubs = cursor.fetchall()
+    mysql_conn.close()
+
+    submitted_ids = [i['item_id'] for i in submitted_pubs]
+    print(submitted_ids)
+
+    return submitted_ids
+
+
+# =========================
+def get_eschol_pmid_pubs(env, submitted_ids):
+
+    # connect to the mySql db
+    mysql_conn = get_eschol_db_connection(env)
+
+    exclude_ids_sql = ',\n'.join([f"'{i}'" for i in submitted_ids]) if len(submitted_ids) > 0 else ''
+
+    # Query for items w/ PMIDs
+    eschol_sql = f"""
+        select id as `eschol_id`, json_t.*
         from
             items i,
             JSON_TABLE(
@@ -75,9 +118,14 @@ def get_eschol_pmid_pubs(env, ):
                 COLUMNS(local_id_type varchar(255) PATH "$.type",
                         local_id_value varchar(255) PATH "$.id")
             ) as json_t
-        where json_t.local_id_type in ('pmid')
+        where
+            json_t.local_id_type in ('pmid')
+            and (json_t.local_id_value not REGEXP('[^0-9]') 
+                and json_t.local_id_value != '')
         order by i.added;
         """
+
+# Goes above "order by i.added": and i.id not in ({exclude_ids_sql})
 
     with mysql_conn.cursor() as cursor:
         print("Connected to eSchol MySQL DB. Querying for items with PubMed IDs.")
@@ -89,7 +137,7 @@ def get_eschol_pmid_pubs(env, ):
 
 
 # =========================
-def create_resource_xml(items, output_dir, file_number):
+def create_resource_xml(items, output_dir, file_number, run_time):
     link_set = ET.Element("LinkSet")
 
     for item in items:
@@ -115,24 +163,24 @@ def create_resource_xml(items, output_dir, file_number):
         ET.SubElement(object_url, "UrlName").text = "Full text from University of California eScholarship"
         ET.SubElement(object_url, "Attribute").text = "full-text PDF"
 
-    # Needs to be added manually before xml output
-    doctype_header = '<?xml version="1.0" ?>\n' \
-                     '<!DOCTYPE LinkSet PUBLIC "-//NLM//DTD LinkOut 1.0//EN" ' \
-                     '"https://www.ncbi.nlm.nih.gov/projects/linkout/doc/LinkOut.dtd" ' \
-                     '[<!ENTITY icon.url "https://escholarship.org/images/pubmed_linkback.png"> ' \
-                     '<!ENTITY base.url "https://escholarship.org/uc/item/" > ]>\n'
-
     # Output XML file
-    output_filename = f'{output_dir}/{resource_filename_no_extension}_{file_number}.xml'
-    print(output_filename)
+    filename_date = run_time.split('T')[0]
+    output_filename = f'{output_dir}/{filename_date}_{resource_filename_no_extension}_{file_number}.xml'
     with open(output_filename, 'w') as f:
+        print(output_filename)
+
+        # Add the header manually before the XML body
+        doctype_header = '<?xml version="1.0" ?>\n' \
+                         '<!DOCTYPE LinkSet PUBLIC "-//NLM//DTD LinkOut 1.0//EN" ' \
+                         '"https://www.ncbi.nlm.nih.gov/projects/linkout/doc/LinkOut.dtd" ' \
+                         '[<!ENTITY icon.url "https://escholarship.org/images/pubmed_linkback.png"> ' \
+                         '<!ENTITY base.url "https://escholarship.org/uc/item/" > ]>\n'
         f.write(doctype_header)
 
         # Element tree: Convert to string, replace & html escaping
         ET.indent(link_set, space="\t", level=0)
         xml_string = ET.tostring(link_set, encoding='unicode')
         xml_string = xml_string.replace('&amp;', '&')
-
         f.write(xml_string)
 
     # Return the output filename
@@ -159,6 +207,21 @@ def upload_xml_files_to_ftp(files, env):
             ftp.storbinary(f'STOR {xml_filename}', file)
 
     ftp.quit()
+
+
+def update_logging_db(env, eschol_pmid_pubs):
+    # Connect to logging DB
+    mysql_conn = get_logging_db_connection(env)
+    mysql_conn.autocommit(True)
+
+    # Query for items w/ PMIDs
+    with mysql_conn.cursor() as cursor:
+        print("Connected to the logging DB, adding newly-submitted eSchol IDs")
+        linkout_insert_sql = "INSERT INTO linkout_items (item_id, pmid) VALUES (%(eschol_id)s, %(local_id_value)s)"
+        cursor.executemany(linkout_insert_sql, eschol_pmid_pubs)
+        mysql_conn.commit()
+
+    mysql_conn.close()
 
 
 # =========================
