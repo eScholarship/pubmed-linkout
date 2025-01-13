@@ -4,7 +4,6 @@
 from dotenv import dotenv_values
 import pymysql
 import submit_new_eschol_pubmed_items
-from time import sleep
 
 submission_threshold = 10
 
@@ -66,11 +65,11 @@ def get_previous_pubmed_submissions(env):
     # Get the Item IDs already submitted
     with mysql_conn.cursor() as cursor:
         print("Connected to the logging DB. Collecting previously-submitted IDs.")
-        cursor.execute("SELECT item_id FROM linkout_items")
+        cursor.execute("SELECT eschol_id FROM linkout_items")
         submitted_pubs = cursor.fetchall()
     mysql_conn.close()
 
-    submitted_ids = [i['item_id'] for i in submitted_pubs]
+    submitted_ids = [i['eschol_id'] for i in submitted_pubs]
     return submitted_ids
 
 
@@ -120,12 +119,12 @@ def add_new_items_to_logging_db(env, new_eschol_pubmed_items):
     # Get the Item IDs already submitted
     print(f"Adding {len(new_eschol_pubmed_items)} new items to the pmid logging db.")
     with mysql_conn.cursor() as cursor:
-        linkout_insert_sql = "INSERT INTO linkout_items (item_id, pmid) VALUES (%(id)s, %(pmid)s)"
+        linkout_insert_sql = "INSERT INTO linkout_items (eschol_id, pmid) VALUES (%(id)s, %(pmid)s)"
         cursor.executemany(linkout_insert_sql, new_eschol_pubmed_items)
         mysql_conn.commit()
 
         print(f"Checking new total enqueued items.")
-        cursor.execute("""SELECT count(item_id) as total_enqueued
+        cursor.execute("""SELECT count(eschol_id) as total_enqueued
                 FROM linkout_items WHERE submitted IS NULL""")
         total_enqueued = cursor.fetchone()['total_enqueued']
         mysql_conn.close()
