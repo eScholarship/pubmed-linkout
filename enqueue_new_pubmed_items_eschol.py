@@ -3,7 +3,7 @@
 
 from dotenv import dotenv_values
 import pymysql
-import submit_new_eschol_pubmed_items
+import submit_new_pubmed_items
 
 submission_threshold = 10
 

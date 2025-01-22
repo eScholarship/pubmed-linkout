@@ -1,7 +1,6 @@
 from dotenv import dotenv_values
 import datetime
 import pymysql
-import os
 import xml.etree.ElementTree as ET
 from ftplib import FTP
 import subprocess
@@ -28,25 +27,23 @@ def main():
     run_time = run_time.replace(':', "-")
     run_date = run_time.split('T')[0]
 
-    output_dir = f"output/{run_time}-pubmed-linkout-files"
-    os.mkdir(f"./{output_dir}")
-    resource_filename = "eschol_linkout_resource.xml"
+    output_dir = "output"
+    submission_file = f"{run_date}_eschol_linkout_resource.xml"
 
     # Get the new items enqueued for submission
     new_items = get_new_items_for_submission(env)
 
     # Create the XML file
-    submission_file_with_path = create_submission_file(new_items, run_date, output_dir, resource_filename)
-    submission_filename = submission_file_with_path.split('/')[-1]
+    submission_file_with_path = create_submission_file(new_items, output_dir, submission_file)
 
     # Send to PubMed FTP
-    upload_submission_file_to_ftp(env, submission_file_with_path, submission_filename)
+    upload_submission_file_to_ftp(env, submission_file_with_path, submission_file)
 
     # Update the logging DB
-    update_logging_db(env, submission_filename)
+    update_logging_db(env, submission_file)
 
     # Email stakeholders
-    send_notification_email(env, submission_filename)
+    send_notification_email(env, submission_file)
 
     print("Program complete. Exiting.")
 
@@ -64,15 +61,15 @@ def get_new_items_for_submission(env):
     return new_items
 
 
-def create_submission_file(new_items, run_date, output_dir, resource_filename):
+def create_submission_file(new_items, output_dir, submission_file):
 
     # Create the XML from new_items dict
     xml_data = create_xml_data(new_items)
 
-    # Export XML-->string to output file
-    output_filename = f'{output_dir}/{run_date}_{resource_filename}'
-    with open(output_filename, 'w') as f:
-        print(f"Exporting: {output_filename}")
+    # Export XML --> string to output file
+    submission_file_with_path = f'{output_dir}/{submission_file}'
+    with open(submission_file_with_path, 'w') as f:
+        print(f"Exporting: {submission_file_with_path}")
 
         # Add the header manually before the XML body
         doctype_header = '<?xml version="1.0" ?>\n' \
@@ -89,7 +86,7 @@ def create_submission_file(new_items, run_date, output_dir, resource_filename):
         f.write(xml_string)
 
     # Return the output filename
-    return output_filename
+    return submission_file_with_path
 
 
 def create_xml_data(new_items):
@@ -121,26 +118,24 @@ def create_xml_data(new_items):
     return link_set
 
 
-def upload_submission_file_to_ftp(env, submission_file_with_path, submission_filename):
+def upload_submission_file_to_ftp(env, submission_file_with_path, submission_file):
     # https://docs.python.org/3/library/ftplib.html#ftplib.FTP.storbinary
 
     print("Connecting to PubMed Linkout FTP.")
     ftp = FTP(env['LINKOUT_FTP_URL'],
               env['LINKOUT_FTP_USER'],
-              env['LINKOUT_FTP_PASSWORD'])
-    # should return a 230 successful login
+              env['LINKOUT_FTP_PASSWORD'])  # should return 230 successful login
 
-    ftp.cwd(env['LINKOUT_FTP_DIR'])
-    # should return a 250 successful dir change
+    ftp.cwd(env['LINKOUT_FTP_DIR'])  # should return 250 successful dir change
 
-    print(f"Transferring: {submission_filename}")
+    print(f"Transferring: {submission_file}")
     with open(submission_file_with_path, 'rb') as file:
-        ftp.storbinary(f'STOR {submission_filename}', file)
+        ftp.storbinary(f'STOR {submission_file}', file)
 
     ftp.quit()
 
 
-def update_logging_db(env, submission_filename):
+def update_logging_db(env, submission_file):
     mysql_conn = get_logging_db_connection(env)
 
     print("Connected to logging DB. Updating submitted items.")
@@ -149,25 +144,25 @@ def update_logging_db(env, submission_filename):
             UPDATE linkout_items
             SET
                 submitted = now(),
-                pubmed_filename = '{submission_filename}'
+                pubmed_filename = '{submission_file}'
             WHERE pubmed_filename IS NULL""")
         mysql_conn.commit()
 
     mysql_conn.close()
 
 
-def send_notification_email(env, submission_filename):
+def send_notification_email(env, submission_file):
     # Set up the mail process with attachment and email recipients
     subprocess_setup = ['mail',
                         '-s', 'New UC eScholarship .xml file added to linkout FTP']
     # subprocess_setup += [env['DEVIN'], env['ALAINNA'], env['PUBMED_CONTACT']]
     subprocess_setup += [env['DEVIN'], env['ALAINNA']]
 
-    input_byte_string = b'''Salutations,
+    input_byte_string = b'''Saltulations, this is an automated message.
     
 An .xml file containing new publications for LinkOut has been added to our "holdings" folder on the FTP:
 
-''' + submission_filename.encode('UTF8') + b'''.
+''' + submission_file.encode('UTF8') + b'''.
 
 Please email us at the CC'd address if you have any questions.
 
