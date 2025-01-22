@@ -6,31 +6,27 @@ import pymysql
 import pyodbc
 import submit_new_eschol_pubmed_items
 
-submission_threshold = 200
+submission_threshold = 1000
 
 
 # =========================
 # Get Connections
 def get_eschol_db_connection(env):
-    mysql_conn = pymysql.connect(
+    return pymysql.connect(
         host=env['ESCHOL_DB_SERVER_PROD'],
         user=env['ESCHOL_DB_USER_PROD'],
         password=env['ESCHOL_DB_PASSWORD_PROD'],
         database=env['ESCHOL_DB_DATABASE_PROD'],
         cursorclass=pymysql.cursors.DictCursor)
 
-    return mysql_conn
-
 
 def get_logging_db_connection(env):
-    mysql_conn = pymysql.connect(
+    return pymysql.connect(
         host=env['LOGGING_DB_SERVER'],
         user=env['LOGGING_DB_USER'],
         password=env['LOGGING_DB_PASSWORD'],
         database=env['LOGGING_DB_DATABASE'],
         cursorclass=pymysql.cursors.DictCursor)
-
-    return mysql_conn
 
 
 def get_elements_report_db_connection(env):
@@ -41,9 +37,7 @@ def get_elements_report_db_connection(env):
         uid=env['ELEMENTS_REPORTING_DB_USER_PROD'],
         pwd=env['ELEMENTS_REPORTING_DB_PASSWORD_PROD'],
         trustservercertificate='yes')
-
     mssql_conn.autocommit = True  # Required when queries use TRANSACTION
-
     return mssql_conn
 
 
@@ -93,20 +87,17 @@ def get_new_pmid_pubs(env, submitted_ids):
     # connect to the mySql db
     mssql_conn = get_elements_report_db_connection(env)
     with mssql_conn.cursor() as cursor:
-        print("Connected to eSchol DB.")
+        print("Connected to Elements Reporting DB.")
 
         print("Creating temp table with submitted IDs.")
-        temp_table_create = "CREATE TABLE #linkout_ids (id varchar(16))"
-        cursor.execute(temp_table_create)
-
+        cursor.execute("CREATE TABLE #linkout_ids (id varchar(16))")
         temp_table_insert = "INSERT INTO #linkout_ids (id) VALUES (?)"
         cursor.fast_executemany = True  # enables bulk inserting in executemany
-        submitted_ids = [[s] for s in submitted_ids]  # Required list format for bulk
+        submitted_ids = [[s] for s in submitted_ids]  # Required format for executemany
         cursor.executemany(temp_table_insert, submitted_ids)
         mssql_conn.commit()
 
-        # -----------------------
-        print("Querying for new pubmed items")
+        print("Querying Elements Reporting DB for new pubmed items")
         get_new_eschol_pubmed_items = """
             SET TRANSACTION ISOLATION LEVEL SNAPSHOT;
             BEGIN TRANSACTION;
