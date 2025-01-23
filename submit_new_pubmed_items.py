@@ -153,18 +153,14 @@ def update_logging_db(env, submission_file):
 
 def send_notification_email(env, submission_file):
     # Set up the mail process with attachment and email recipients
-    subprocess_setup = ['mail',
-                        '-s', 'New UC eScholarship .xml file added to linkout FTP']
-    # subprocess_setup += [env['DEVIN'], env['ALAINNA'], env['PUBMED_CONTACT']]
-    subprocess_setup += [env['DEVIN'], env['ALAINNA']]
+    subprocess_setup = ['mail', '-s', 'New UC eScholarship .xml file added to linkout FTP']
+    subprocess_setup += [env['DEVIN'], env['OAPOLICY_HELP']]
 
     input_byte_string = b'''Saltulations, this is an automated message.
     
 An .xml file containing new publications for LinkOut has been added to our "holdings" folder on the FTP:
 
 ''' + submission_file.encode('UTF8') + b'''.
-
-Please email us at the CC'd address if you have any questions.
 
 Thank you!'''
 
