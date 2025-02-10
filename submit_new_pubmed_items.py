@@ -53,7 +53,7 @@ def get_new_items_for_submission(env):
 
     print("Connected to logging DB. Getting new items for submission.")
     with mysql_conn.cursor() as cursor:
-        cursor.execute("""SELECT item_id, pmid FROM linkout_items
+        cursor.execute("""SELECT eschol_id, pubmed_id FROM linkout_items
             WHERE submitted IS NULL""")
         new_items = cursor.fetchall()
     mysql_conn.close()
@@ -94,7 +94,7 @@ def create_xml_data(new_items):
 
     for item in new_items:
         link = ET.SubElement(link_set, "Link")
-        ET.SubElement(link, "LinkId").text = item['item_id']
+        ET.SubElement(link, "LinkId").text = item['eschol_id']
         ET.SubElement(link, "ProviderId").text = "7383"
         # ET.SubElement(link, "IconURL").text = "https://escholarship.org/images/pubmed_linkback.png"
         ET.SubElement(link, "IconUrl").text = "&icon.url;"
@@ -105,13 +105,13 @@ def create_xml_data(new_items):
 
         # Link > ObjectSelector > ObjectList
         object_list = ET.SubElement(object_selector, "ObjectList")
-        ET.SubElement(object_list, "ObjId").text = item['pmid']
+        ET.SubElement(object_list, "ObjId").text = str(item['pubmed_id'])
 
         # Link > ObjectURL
         object_url = ET.SubElement(link, "ObjectUrl")
         # ET.SubElement(object_url, "Rule").text = f"https://escholarship.org/uc/item/{item['eschol_id']}"
         ET.SubElement(object_url, "Base").text = '&base.url;'
-        ET.SubElement(object_url, "Rule").text = item['item_id']
+        ET.SubElement(object_url, "Rule").text = item['eschol_id']
         ET.SubElement(object_url, "UrlName").text = "Full text from University of California eScholarship"
         ET.SubElement(object_url, "Attribute").text = "full-text PDF"
 
