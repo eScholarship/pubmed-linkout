@@ -32,6 +32,7 @@ def main():
 
     # Get the new items enqueued for submission
     new_items = get_new_items_for_submission(env)
+    new_item_count = len(new_items)
 
     # Create the XML file
     submission_file_with_path = create_submission_file(new_items, output_dir, submission_file)
@@ -43,7 +44,7 @@ def main():
     update_logging_db(env, submission_file)
 
     # Email stakeholders
-    send_notification_email(env, submission_file)
+    send_notification_email(env, submission_file, new_item_count)
 
     print("Program complete. Exiting.")
 
@@ -151,7 +152,7 @@ def update_logging_db(env, submission_file):
     mysql_conn.close()
 
 
-def send_notification_email(env, submission_file):
+def send_notification_email(env, submission_file, new_item_count):
     # Set up the mail process with attachment and email recipients
     subprocess_setup = ['mail', '-s', 'New UC eScholarship .xml file added to linkout FTP']
     subprocess_setup += [env['DEVIN'], env['OAPOLICY_HELP']]
@@ -160,7 +161,7 @@ def send_notification_email(env, submission_file):
     
 An .xml file containing new publications for LinkOut has been added to our "holdings" folder on the FTP:
 
-''' + submission_file.encode('UTF8') + b'''.
+''' + submission_file.encode('UTF8') + b''' (''' + str(new_item_count).encode('UTF8') + b''' new publication links).
 
 Thank you!'''
 
