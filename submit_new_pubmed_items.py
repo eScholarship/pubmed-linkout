@@ -112,7 +112,7 @@ def create_xml_data(new_items):
         object_url = ET.SubElement(link, "ObjectUrl")
         # ET.SubElement(object_url, "Rule").text = f"https://escholarship.org/uc/item/{item['eschol_id']}"
         ET.SubElement(object_url, "Base").text = '&base.url;'
-        ET.SubElement(object_url, "Rule").text = item['eschol_id']
+        ET.SubElement(object_url, "Rule").text = item['eschol_id'][2:]
         ET.SubElement(object_url, "UrlName").text = "Full text from University of California eScholarship"
         ET.SubElement(object_url, "Attribute").text = "full-text PDF"
 
