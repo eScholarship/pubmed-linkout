@@ -112,7 +112,7 @@ def create_xml_data(new_items):
         object_url = ET.SubElement(link, "ObjectUrl")
         # ET.SubElement(object_url, "Rule").text = f"https://escholarship.org/uc/item/{item['eschol_id']}"
         ET.SubElement(object_url, "Base").text = '&base.url;'
-        ET.SubElement(object_url, "Rule").text = item['eschol_id']
+        ET.SubElement(object_url, "Rule").text = item['eschol_id'][2:]
         ET.SubElement(object_url, "UrlName").text = "Full text from University of California eScholarship"
         ET.SubElement(object_url, "Attribute").text = "full-text PDF"
 
@@ -170,5 +170,17 @@ Thank you!'''
 
 
 # =========================
+# Runs the program if the bit is 1
+# otherwise just flip the bit and save.
 if __name__ == '__main__':
-    main()
+    with open("biweekly_bit.txt", 'r') as f:
+        biweekly_bit = f.read().strip()
+
+    if biweekly_bit == '1':
+        biweekly_bit = 0
+        main()
+    else:
+        biweekly_bit = 1
+
+    with open("biweekly_bit.txt", 'w') as f:
+        f.write(str(biweekly_bit))
