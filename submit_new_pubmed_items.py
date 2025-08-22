@@ -157,13 +157,20 @@ def send_notification_email(env, submission_file, new_item_count):
     subprocess_setup = ['mail', '-s', 'New UC eScholarship .xml file added to linkout FTP']
     subprocess_setup += [env['DEVIN'], env['OAPOLICY_HELP']]
 
-    input_byte_string = b'''Saltulations, this is an automated message.
-    
+    input_byte_string = b'''
+Hello Pubmed,
+
 An .xml file containing new publications for LinkOut has been added to our "holdings" folder on the FTP:
 
 ''' + submission_file.encode('UTF8') + b''' (''' + str(new_item_count).encode('UTF8') + b''' new publication links).
 
-Thank you!'''
+Thank you!
+- CDL
+
+
+Future-proofing Note:
+This automated message is sent from the pubmed-linkout tool: https://github.com/eScholarship/pubmed-linkout 
+'''
 
     # Run the subprocess
     subprocess.run(subprocess_setup, input=input_byte_string, capture_output=True)
