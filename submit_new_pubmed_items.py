@@ -170,8 +170,7 @@ Thank you!'''
 
 
 # =========================
-# Runs the program if the bit is 1
-# otherwise just flip the bit and save.
+# Runs the program if the bit is 1, otherwise flip the bit and exit.
 if __name__ == '__main__':
     with open("biweekly_bit.txt", 'r') as f:
         biweekly_bit = f.read().strip()

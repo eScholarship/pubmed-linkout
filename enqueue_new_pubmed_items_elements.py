@@ -51,9 +51,9 @@ def main():
     # Get newly-added eSchol pubmed items;
     # Add them to the logging db
     # Check the total number of enqueued items
-    new_eschol_pubmed_items = get_new_pmid_pubs(env, submitted_ids)
-    if new_eschol_pubmed_items:
-        total_enqueued = add_new_items_to_logging_db(env, new_eschol_pubmed_items)
+    new_pubmed_items = get_new_pmid_pubs(env, submitted_ids)
+    if new_pubmed_items:
+        total_enqueued = add_new_items_to_logging_db(env, new_pubmed_items)
     else:
         print("No new pmid publications in eScholarship. Exiting.")
         exit(1)
@@ -61,7 +61,7 @@ def main():
     print(f"Including the new items, {total_enqueued} total items are enqueued for submission.")
     if total_enqueued >= submission_threshold:
         print(f"Total enqueued items over the threshold ({submission_threshold}): Moving to submission step.\n")
-        submit_new_eschol_pubmed_items.main()
+        submit_new_pubmed_items.main()
     else:
         print(f"Total enqueued items under the submission threshold ({submission_threshold}): Exiting.")
         exit(1)
