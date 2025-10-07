@@ -1,25 +1,49 @@
-from dotenv import dotenv_values
+import boto3
 import datetime
 import pymysql
 import xml.etree.ElementTree as ET
 from ftplib import FTP
 import subprocess
 
+session = boto3.Session()
 
-# =========================
-def get_logging_db_connection(env):
-    mysql_conn = pymysql.connect(
-        host=env['LOGGING_DB_SERVER'],
-        user=env['LOGGING_DB_USER'],
-        password=env['LOGGING_DB_PASSWORD'],
-        database=env['LOGGING_DB_DATABASE'],
+
+def get_ssm_parameters(folder, names):
+    print("Connect to SSM for parameters")
+    ssm_client = session.client(service_name='ssm', region_name='us-west-2')
+
+    param_names = [f"{folder}{name}" for name in names]
+    response = ssm_client.get_parameters(Names=param_names, WithDecryption=True)
+
+    param_values = {
+        (param['Name'].split('/')[-1]): param['Value']
+        for param in response['Parameters']}
+
+    return param_values
+
+
+def get_logging_db_connection(creds):
+    return pymysql.connect(
+        host=creds['server'],
+        user=creds['user'],
+        password=creds['password'],
+        database=creds['database'],
         cursorclass=pymysql.cursors.DictCursor)
 
-    return mysql_conn
 
-
+# =========================
 def main():
-    env = dotenv_values(".env")
+    tools_rds_creds = get_ssm_parameters(
+        folder="/pub-oapi-tools/tools-rds/prod/",
+        names=['server', 'database', 'user', 'password'])
+
+    pubmed_linkout_ftp_creds = get_ssm_parameters(
+        folder="/pub-oapi-tools/pubmed-linkout-ftp/",
+        names=['url', 'user', 'password', 'dir'])
+
+    emails = get_ssm_parameters(
+        folder="/pub-oapi-tools/emails/",
+        names=['devin', 'oapolicy-help'])
 
     # Runtime string for dirs, filenames, logging DB
     run_time = datetime.datetime.now()
@@ -31,26 +55,26 @@ def main():
     submission_file = f"{run_date}_eschol_linkout_resource.xml"
 
     # Get the new items enqueued for submission
-    new_items = get_new_items_for_submission(env)
+    new_items = get_new_items_for_submission(tools_rds_creds)
     new_item_count = len(new_items)
 
     # Create the XML file
     submission_file_with_path = create_submission_file(new_items, output_dir, submission_file)
 
     # Send to PubMed FTP
-    upload_submission_file_to_ftp(env, submission_file_with_path, submission_file)
+    upload_submission_file_to_ftp(pubmed_linkout_ftp_creds, submission_file_with_path, submission_file)
 
     # Update the logging DB
-    update_logging_db(env, submission_file)
+    update_logging_db(tools_rds_creds, submission_file)
 
     # Email stakeholders
-    send_notification_email(env, submission_file, new_item_count)
+    send_notification_email(emails, submission_file, new_item_count)
 
     print("Program complete. Exiting.")
 
 
-def get_new_items_for_submission(env):
-    mysql_conn = get_logging_db_connection(env)
+def get_new_items_for_submission(creds):
+    mysql_conn = get_logging_db_connection(creds)
 
     print("Connected to logging DB. Getting new items for submission.")
     with mysql_conn.cursor() as cursor:
@@ -119,15 +143,12 @@ def create_xml_data(new_items):
     return link_set
 
 
-def upload_submission_file_to_ftp(env, submission_file_with_path, submission_file):
+def upload_submission_file_to_ftp(creds, submission_file_with_path, submission_file):
     # https://docs.python.org/3/library/ftplib.html#ftplib.FTP.storbinary
 
     print("Connecting to PubMed Linkout FTP.")
-    ftp = FTP(env['LINKOUT_FTP_URL'],
-              env['LINKOUT_FTP_USER'],
-              env['LINKOUT_FTP_PASSWORD'])  # should return 230 successful login
-
-    ftp.cwd(env['LINKOUT_FTP_DIR'])  # should return 250 successful dir change
+    ftp = FTP(creds['url'], creds['user'], creds['password'])  # should return 230 successful login
+    ftp.cwd(creds['dir'])  # should return 250 successful dir change
 
     print(f"Transferring: {submission_file}")
     with open(submission_file_with_path, 'rb') as file:
@@ -136,8 +157,8 @@ def upload_submission_file_to_ftp(env, submission_file_with_path, submission_fil
     ftp.quit()
 
 
-def update_logging_db(env, submission_file):
-    mysql_conn = get_logging_db_connection(env)
+def update_logging_db(creds, submission_file):
+    mysql_conn = get_logging_db_connection(creds)
 
     print("Connected to logging DB. Updating submitted items.")
     with mysql_conn.cursor() as cursor:
@@ -152,10 +173,10 @@ def update_logging_db(env, submission_file):
     mysql_conn.close()
 
 
-def send_notification_email(env, submission_file, new_item_count):
+def send_notification_email(emails, submission_file, new_item_count):
     # Set up the mail process with attachment and email recipients
     subprocess_setup = ['mail', '-s', 'New UC eScholarship .xml file added to linkout FTP']
-    subprocess_setup += [env['DEVIN'], env['OAPOLICY_HELP']]
+    subprocess_setup += [emails['devin'], emails['oapolicy-help']]
 
     input_byte_string = b'''
 Hello Pubmed,
