@@ -6,7 +6,7 @@ import pymysql
 import pyodbc
 import submit_new_pubmed_items
 
-submission_threshold = 1000
+submission_threshold = 250
 session = boto3.Session()
 
 
@@ -52,7 +52,7 @@ def get_elements_report_db_connection(creds):
 def main():
     elements_db_creds = get_ssm_parameters(
         folder="/pub-oapi-tools/elements-reporting-db/prod/",
-        names=['server', 'database', 'user', 'password'])
+        names=['server', 'database', 'user', 'password', 'driver'])
 
     tools_rds_creds = get_ssm_parameters(
         folder="/pub-oapi-tools/tools-rds/prod/",
