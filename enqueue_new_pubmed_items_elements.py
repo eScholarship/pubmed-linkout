@@ -1,41 +1,48 @@
 # LinkOut submission documentation
 # https://www.ncbi.nlm.nih.gov/books/NBK3812/
 
-from dotenv import dotenv_values
+import boto3
 import pymysql
 import pyodbc
 import submit_new_pubmed_items
 
-submission_threshold = 1000
+submission_threshold = 250
+session = boto3.Session()
 
 
 # =========================
 # Get Connections
-def get_eschol_db_connection(env):
+
+def get_ssm_parameters(folder, names):
+    print("Connect to SSM for parameters")
+    ssm_client = session.client(service_name='ssm', region_name='us-west-2')
+
+    param_names = [f"{folder}{name}" for name in names]
+    response = ssm_client.get_parameters(Names=param_names, WithDecryption=True)
+
+    param_values = {
+        (param['Name'].split('/')[-1]): param['Value']
+        for param in response['Parameters']}
+
+    return param_values
+
+
+def get_logging_db_connection(creds):
     return pymysql.connect(
-        host=env['ESCHOL_DB_SERVER_PROD'],
-        user=env['ESCHOL_DB_USER_PROD'],
-        password=env['ESCHOL_DB_PASSWORD_PROD'],
-        database=env['ESCHOL_DB_DATABASE_PROD'],
+        host=creds['server'],
+        user=creds['user'],
+        password=creds['password'],
+        database=creds['database'],
         cursorclass=pymysql.cursors.DictCursor)
 
 
-def get_logging_db_connection(env):
-    return pymysql.connect(
-        host=env['LOGGING_DB_SERVER'],
-        user=env['LOGGING_DB_USER'],
-        password=env['LOGGING_DB_PASSWORD'],
-        database=env['LOGGING_DB_DATABASE'],
-        cursorclass=pymysql.cursors.DictCursor)
-
-
-def get_elements_report_db_connection(env):
+def get_elements_report_db_connection(creds):
     mssql_conn = pyodbc.connect(
-        driver=env['ELEMENTS_REPORTING_DB_DRIVER_PROD'],
-        server=(env['ELEMENTS_REPORTING_DB_SERVER_PROD'] + ',' + env['ELEMENTS_REPORTING_DB_PORT_PROD']),
-        database=env['ELEMENTS_REPORTING_DB_DATABASE_PROD'],
-        uid=env['ELEMENTS_REPORTING_DB_USER_PROD'],
-        pwd=env['ELEMENTS_REPORTING_DB_PASSWORD_PROD'],
+        driver=creds['driver'],
+        server=(creds['server'] + ',1433'),
+        database=creds['database'],
+        uid=creds['user'],
+        pwd=creds['password'],
         trustservercertificate='yes')
     mssql_conn.autocommit = True  # Required when queries use TRANSACTION
     return mssql_conn
@@ -43,17 +50,23 @@ def get_elements_report_db_connection(env):
 
 # =========================
 def main():
-    env = dotenv_values(".env")
+    elements_db_creds = get_ssm_parameters(
+        folder="/pub-oapi-tools/elements-reporting-db/prod/",
+        names=['server', 'database', 'user', 'password', 'driver'])
+
+    tools_rds_creds = get_ssm_parameters(
+        folder="/pub-oapi-tools/tools-rds/prod/",
+        names=['server', 'database', 'user', 'password'])
 
     # Get the pubs we've already submitted - returns a list of eschol_ids.
-    submitted_ids = get_previous_pubmed_submissions(env)
+    submitted_ids = get_previous_pubmed_submissions(tools_rds_creds)
 
     # Get newly-added eSchol pubmed items;
     # Add them to the logging db
     # Check the total number of enqueued items
-    new_pubmed_items = get_new_pmid_pubs(env, submitted_ids)
+    new_pubmed_items = get_new_pmid_pubs(elements_db_creds, submitted_ids)
     if new_pubmed_items:
-        total_enqueued = add_new_items_to_logging_db(env, new_pubmed_items)
+        total_enqueued = add_new_items_to_logging_db(tools_rds_creds, new_pubmed_items)
     else:
         print("No new pmid publications in eScholarship. Exiting.")
         exit(1)
@@ -68,8 +81,8 @@ def main():
 
 
 # =========================
-def get_previous_pubmed_submissions(env):
-    mysql_conn = get_logging_db_connection(env)
+def get_previous_pubmed_submissions(tools_rds):
+    mysql_conn = get_logging_db_connection(tools_rds)
 
     # Get the Item IDs already submitted
     with mysql_conn.cursor() as cursor:
@@ -82,15 +95,15 @@ def get_previous_pubmed_submissions(env):
     return submitted_ids
 
 
-def get_new_pmid_pubs(env, submitted_ids):
+def get_new_pmid_pubs(elements_reporting_db, submitted_ids):
 
     # connect to the mySql db
-    mssql_conn = get_elements_report_db_connection(env)
+    mssql_conn = get_elements_report_db_connection(elements_reporting_db)
     with mssql_conn.cursor() as cursor:
         print("Connected to Elements Reporting DB.")
 
         print("Creating temp table with submitted IDs.")
-        cursor.execute("CREATE TABLE #linkout_ids (id varchar(16))")
+        cursor.execute("CREATE TABLE #linkout_ids (id varchar(16) COLLATE Latin1_General_CI_AS)")
         temp_table_insert = "INSERT INTO #linkout_ids (id) VALUES (?)"
         cursor.fast_executemany = True  # enables bulk inserting in executemany
         submitted_ids = [[s] for s in submitted_ids]  # Required format for executemany
@@ -133,8 +146,8 @@ def get_new_pmid_pubs(env, submitted_ids):
     return new_eschol_pubmed_items
 
 
-def add_new_items_to_logging_db(env, new_eschol_pubmed_items):
-    mysql_conn = get_logging_db_connection(env)
+def add_new_items_to_logging_db(tools_rds, new_eschol_pubmed_items):
+    mysql_conn = get_logging_db_connection(tools_rds)
 
     # Get the Item IDs already submitted
     print(f"Adding {len(new_eschol_pubmed_items)} new items to the pmid logging db.")
