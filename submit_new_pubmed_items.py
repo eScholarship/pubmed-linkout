@@ -27,7 +27,7 @@ def get_logging_db_connection(creds):
         host=creds['server'],
         user=creds['user'],
         password=creds['password'],
-        database=creds['database'],
+        database=creds['pubmed-linkout-db'],
         cursorclass=pymysql.cursors.DictCursor)
 
 
@@ -35,7 +35,7 @@ def get_logging_db_connection(creds):
 def main():
     tools_rds_creds = get_ssm_parameters(
         folder="/pub-oapi-tools/tools-rds/prod/",
-        names=['server', 'database', 'user', 'password'])
+        names=['server', 'pubmed-linkout-db', 'user', 'password'])
 
     pubmed_linkout_ftp_creds = get_ssm_parameters(
         folder="/pub-oapi-tools/pubmed-linkout-ftp/",
