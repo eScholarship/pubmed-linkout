@@ -1,48 +1,46 @@
 # LinkOut submission documentation
 # https://www.ncbi.nlm.nih.gov/books/NBK3812/
 
-import boto3
+from pub_oapi_tools_common import parameter_store_connect
 import pymysql
 import pyodbc
 import submit_new_pubmed_items
 
 submission_threshold = 250
-session = boto3.Session()
+
+
+# =========================
+creds = {
+    'elements_db': {
+        'folder': 'pub-oapi-tools/elements-reporting-db',
+        'env': 'prod'},
+    'linkout_db': {
+        'folder': 'pub-oapi-tools/tools-rds',
+        'env': 'prod',
+        'names': ['server', 'pubmed-linkout-db', 'user', 'password']}
+}
+
+creds = parameter_store_connect.get_parameters(creds)
 
 
 # =========================
 # Get Connections
-
-def get_ssm_parameters(folder, names):
-    print("Connect to SSM for parameters")
-    ssm_client = session.client(service_name='ssm', region_name='us-west-2')
-
-    param_names = [f"{folder}{name}" for name in names]
-    response = ssm_client.get_parameters(Names=param_names, WithDecryption=True)
-
-    param_values = {
-        (param['Name'].split('/')[-1]): param['Value']
-        for param in response['Parameters']}
-
-    return param_values
-
-
-def get_logging_db_connection(creds):
+def get_logging_db_connection(linkout_db):
     return pymysql.connect(
-        host=creds['server'],
-        user=creds['user'],
-        password=creds['password'],
-        database=creds['pubmed-linkout-db'],
+        host=linkout_db['server'],
+        user=linkout_db['user'],
+        password=linkout_db['password'],
+        database=linkout_db['pubmed-linkout-db'],
         cursorclass=pymysql.cursors.DictCursor)
 
 
-def get_elements_report_db_connection(creds):
+def get_elements_report_db_connection(elements_db):
     mssql_conn = pyodbc.connect(
-        driver=creds['driver'],
-        server=(creds['server'] + ',1433'),
-        database=creds['database'],
-        uid=creds['user'],
-        pwd=creds['password'],
+        driver=elements_db['driver'],
+        server=(elements_db['server'] + ',1433'),
+        database=elements_db['database'],
+        uid=elements_db['user'],
+        pwd=elements_db['password'],
         trustservercertificate='yes')
     mssql_conn.autocommit = True  # Required when queries use TRANSACTION
     return mssql_conn
@@ -50,23 +48,16 @@ def get_elements_report_db_connection(creds):
 
 # =========================
 def main():
-    elements_db_creds = get_ssm_parameters(
-        folder="/pub-oapi-tools/elements-reporting-db/prod/",
-        names=['server', 'database', 'user', 'password', 'driver'])
-
-    tools_rds_creds = get_ssm_parameters(
-        folder="/pub-oapi-tools/tools-rds/prod/",
-        names=['server', 'pubmed-linkout-db', 'user', 'password'])
 
     # Get the pubs we've already submitted - returns a list of eschol_ids.
-    submitted_ids = get_previous_pubmed_submissions(tools_rds_creds)
+    submitted_ids = get_previous_pubmed_submissions(creds['linkout_db'])
 
     # Get newly-added eSchol pubmed items;
     # Add them to the logging db
     # Check the total number of enqueued items
-    new_pubmed_items = get_new_pmid_pubs(elements_db_creds, submitted_ids)
+    new_pubmed_items = get_new_pmid_pubs(creds['elements_db'], submitted_ids)
     if new_pubmed_items:
-        total_enqueued = add_new_items_to_logging_db(tools_rds_creds, new_pubmed_items)
+        total_enqueued = add_new_items_to_logging_db(creds['linkout_db'], new_pubmed_items)
     else:
         print("No new pmid publications in eScholarship. Exiting.")
         exit(1)
