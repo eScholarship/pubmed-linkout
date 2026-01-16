@@ -3,7 +3,8 @@
 
 from pub_oapi_tools_common import aws_lambda
 from pub_oapi_tools_common import ucpms_db
-from pub_oapi_toosl_common import pub_oapi_tools_db
+from pub_oapi_tools_common import pub_oapi_tools_db
+
 import submit_new_pubmed_items
 
 submission_threshold = 250

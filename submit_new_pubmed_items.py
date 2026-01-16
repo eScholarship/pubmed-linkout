@@ -2,10 +2,9 @@
 # https://www.ncbi.nlm.nih.gov/books/NBK3812/
 
 from pub_oapi_tools_common import aws_lambda
-from pub_oapi_toosl_common import pub_oapi_tools_db
+from pub_oapi_tools_common import pub_oapi_tools_db
 
 import datetime
-import pymysql
 import xml.etree.ElementTree as ET
 from ftplib import FTP
 import subprocess
