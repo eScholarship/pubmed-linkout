@@ -1,49 +1,31 @@
-import boto3
+# LinkOut submission documentation
+# https://www.ncbi.nlm.nih.gov/books/NBK3812/
+
+from pub_oapi_tools_common import aws_lambda
+from pub_oapi_tools_common import pub_oapi_tools_db
+
 import datetime
-import pymysql
 import xml.etree.ElementTree as ET
 from ftplib import FTP
 import subprocess
 
-session = boto3.Session()
+pub_oapi_tools_env = "prod"
+pub_oapi_tools_db_name = "pubmed-linkout-db"
 
-
-def get_ssm_parameters(folder, names):
-    print("Connect to SSM for parameters")
-    ssm_client = session.client(service_name='ssm', region_name='us-west-2')
-
-    param_names = [f"{folder}{name}" for name in names]
-    response = ssm_client.get_parameters(Names=param_names, WithDecryption=True)
-
-    param_values = {
-        (param['Name'].split('/')[-1]): param['Value']
-        for param in response['Parameters']}
-
-    return param_values
-
-
-def get_logging_db_connection(creds):
-    return pymysql.connect(
-        host=creds['server'],
-        user=creds['user'],
-        password=creds['password'],
-        database=creds['pubmed-linkout-db'],
-        cursorclass=pymysql.cursors.DictCursor)
+# =========================
+creds = {
+    'pubmed_ftp': {
+        'folder': 'pub-oapi-tools/pubmed-linkout-ftp'},
+    'emails': {
+        'folder': 'pub-oapi-tools/emails',
+        'names': ['devin', 'oapolicy-help']
+    }
+}
+creds = aws_lambda.get_parameters(creds)
 
 
 # =========================
 def main():
-    tools_rds_creds = get_ssm_parameters(
-        folder="/pub-oapi-tools/tools-rds/prod/",
-        names=['server', 'pubmed-linkout-db', 'user', 'password'])
-
-    pubmed_linkout_ftp_creds = get_ssm_parameters(
-        folder="/pub-oapi-tools/pubmed-linkout-ftp/",
-        names=['url', 'user', 'password', 'dir'])
-
-    emails = get_ssm_parameters(
-        folder="/pub-oapi-tools/emails/",
-        names=['devin', 'oapolicy-help'])
 
     # Runtime string for dirs, filenames, logging DB
     run_time = datetime.datetime.now()
@@ -55,26 +37,27 @@ def main():
     submission_file = f"{run_date}_eschol_linkout_resource.xml"
 
     # Get the new items enqueued for submission
-    new_items = get_new_items_for_submission(tools_rds_creds)
+    new_items = get_new_items_for_submission()
     new_item_count = len(new_items)
 
     # Create the XML file
     submission_file_with_path = create_submission_file(new_items, output_dir, submission_file)
 
     # Send to PubMed FTP
-    upload_submission_file_to_ftp(pubmed_linkout_ftp_creds, submission_file_with_path, submission_file)
+    upload_submission_file_to_ftp(creds['pubmed_ftp'], submission_file_with_path, submission_file)
 
     # Update the logging DB
-    update_logging_db(tools_rds_creds, submission_file)
+    update_logging_db(submission_file)
 
     # Email stakeholders
-    send_notification_email(emails, submission_file, new_item_count)
+    send_notification_email(creds['emails'], submission_file, new_item_count)
 
     print("Program complete. Exiting.")
 
 
-def get_new_items_for_submission(creds):
-    mysql_conn = get_logging_db_connection(creds)
+def get_new_items_for_submission():
+    mysql_conn = pub_oapi_tools_db.getconnection(
+        env=pub_oapi_tools_env, database=pub_oapi_tools_db_name)
 
     print("Connected to logging DB. Getting new items for submission.")
     with mysql_conn.cursor() as cursor:
@@ -121,7 +104,6 @@ def create_xml_data(new_items):
         link = ET.SubElement(link_set, "Link")
         ET.SubElement(link, "LinkId").text = item['eschol_id']
         ET.SubElement(link, "ProviderId").text = "7383"
-        # ET.SubElement(link, "IconURL").text = "https://escholarship.org/images/pubmed_linkback.png"
         ET.SubElement(link, "IconUrl").text = "&icon.url;"
 
         # Link > ObjectSelector
@@ -134,7 +116,6 @@ def create_xml_data(new_items):
 
         # Link > ObjectURL
         object_url = ET.SubElement(link, "ObjectUrl")
-        # ET.SubElement(object_url, "Rule").text = f"https://escholarship.org/uc/item/{item['eschol_id']}"
         ET.SubElement(object_url, "Base").text = '&base.url;'
         ET.SubElement(object_url, "Rule").text = item['eschol_id'][2:]
         ET.SubElement(object_url, "UrlName").text = "Full text from University of California eScholarship"
@@ -143,12 +124,15 @@ def create_xml_data(new_items):
     return link_set
 
 
-def upload_submission_file_to_ftp(creds, submission_file_with_path, submission_file):
+def upload_submission_file_to_ftp(ftp_creds, submission_file_with_path, submission_file):
     # https://docs.python.org/3/library/ftplib.html#ftplib.FTP.storbinary
 
     print("Connecting to PubMed Linkout FTP.")
-    ftp = FTP(creds['url'], creds['user'], creds['password'])  # should return 230 successful login
-    ftp.cwd(creds['dir'])  # should return 250 successful dir change
+    ftp = FTP(
+        ftp_creds['url'],
+        ftp_creds['user'],
+        ftp_creds['password'])  # should return 230 successful login
+    ftp.cwd(ftp_creds['dir'])  # should return 250 successful dir change
 
     print(f"Transferring: {submission_file}")
     with open(submission_file_with_path, 'rb') as file:
@@ -157,8 +141,9 @@ def upload_submission_file_to_ftp(creds, submission_file_with_path, submission_f
     ftp.quit()
 
 
-def update_logging_db(creds, submission_file):
-    mysql_conn = get_logging_db_connection(creds)
+def update_logging_db(submission_file):
+    mysql_conn = pub_oapi_tools_db.getconnection(
+        env=pub_oapi_tools_env, database=pub_oapi_tools_db_name)
 
     print("Connected to logging DB. Updating submitted items.")
     with mysql_conn.cursor() as cursor:
@@ -173,12 +158,19 @@ def update_logging_db(creds, submission_file):
     mysql_conn.close()
 
 
+# Set up the mail process with attachment and email recipients
 def send_notification_email(emails, submission_file, new_item_count):
-    # Set up the mail process with attachment and email recipients
     subprocess_setup = ['mail', '-s', 'New UC eScholarship .xml file added to linkout FTP']
     subprocess_setup += [emails['devin'], emails['oapolicy-help']]
+    input_byte_string = get_email_body_text(submission_file, new_item_count)
 
-    input_byte_string = b'''
+    # Run the subprocess
+    subprocess.run(subprocess_setup, input=input_byte_string, capture_output=True)
+
+
+# Split off into its own function bc of the weird formatting
+def get_email_body_text(submission_file, new_item_count):
+    return(b'''
 Hello Pubmed,
 
 An .xml file containing new publications for LinkOut has been added to our "holdings" folder on the FTP:
@@ -190,11 +182,7 @@ Thank you!
 
 
 Future-proofing Note:
-This automated message is sent from the pubmed-linkout tool: https://github.com/eScholarship/pubmed-linkout 
-'''
-
-    # Run the subprocess
-    subprocess.run(subprocess_setup, input=input_byte_string, capture_output=True)
+This automated message is sent from the pubmed-linkout tool: https://github.com/eScholarship/pubmed-linkout ''')
 
 
 # =========================
