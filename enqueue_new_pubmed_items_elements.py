@@ -52,7 +52,9 @@ def main():
 
 # =========================
 def get_previous_pubmed_submissions(tools_rds):
-    mysql_conn = pub_oapi_tools_db.get_connection(tools_rds)
+    # mysql_conn = pub_oapi_tools_db.get_connection(tools_rds)
+    mysql_conn = pub_oapi_tools_db.get_connection(
+        env="prod", database="pubmed-linkout-db")
 
     # Get the Item IDs already submitted
     with mysql_conn.cursor() as cursor:
@@ -68,7 +70,8 @@ def get_previous_pubmed_submissions(tools_rds):
 # Connects to Elements DB, create temp table w/ linkout IDs, get new pubs
 def get_new_pmid_pubs(elements_reporting_db, submitted_ids):
 
-    mssql_conn = ucpms_db.get_connection(elements_reporting_db)
+    # mssql_conn = ucpms_db.get_connection(elements_reporting_db)
+    mssql_conn = ucpms_db.get_connection(env="prod")
     with mssql_conn.cursor() as cursor:
         print("Creating temp table with submitted IDs.")
         cursor.execute("CREATE TABLE #linkout_ids (id varchar(16) COLLATE Latin1_General_CI_AS)")
@@ -115,7 +118,9 @@ def get_new_pmid_pubs(elements_reporting_db, submitted_ids):
 
 
 def add_new_items_to_logging_db(tools_rds, new_eschol_pubmed_items):
-    mysql_conn = pub_oapi_tools_db.get_connection(tools_rds)
+    # mysql_conn = pub_oapi_tools_db.get_connection(tools_rds)
+    mysql_conn = pub_oapi_tools_db.get_connection(
+        env="prod", database="pubmed-linkout-db")
 
     # Get the Item IDs already submitted
     print(f"Adding {len(new_eschol_pubmed_items)} new items to the pmid logging db.")
