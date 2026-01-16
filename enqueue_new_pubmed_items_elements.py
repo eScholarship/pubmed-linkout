@@ -1,42 +1,27 @@
 # LinkOut submission documentation
 # https://www.ncbi.nlm.nih.gov/books/NBK3812/
 
-from pub_oapi_tools_common import aws_lambda
 from pub_oapi_tools_common import ucpms_db
 from pub_oapi_tools_common import pub_oapi_tools_db
 
-import submit_new_pubmed_items
-
 submission_threshold = 250
-
-
-# =========================
-creds = {
-    'elements_db': {
-        'folder': 'pub-oapi-tools/elements-reporting-db',
-        'env': 'prod'},
-    'linkout_db': {
-        'folder': 'pub-oapi-tools/tools-rds',
-        'env': 'prod',
-        'names': ['server', 'pubmed-linkout-db', 'user', 'password']}
-}
-
-creds = aws_lambda.get_parameters(creds)
-creds['linkout_db']['database'] = creds['linkout_db']['pubmed-linkout-db']
+pub_oapi_tools_env = "prod"
+pub_oapi_tools_db_name = "pubmed-linkout-db"
+ucpms_db_env = "prod"
 
 
 # =========================
 def main():
 
     # Get the pubs we've already submitted - returns a list of eschol_ids.
-    submitted_ids = get_previous_pubmed_submissions(creds['linkout_db'])
+    submitted_ids = get_previous_pubmed_submissions()
 
     # Get newly-added eSchol pubmed items
     # Add them to the logging db
     # Check the total number of enqueued items
-    new_pubmed_items = get_new_pmid_pubs(creds['elements_db'], submitted_ids)
+    new_pubmed_items = get_new_pmid_pubs(submitted_ids)
     if new_pubmed_items:
-        total_enqueued = add_new_items_to_logging_db(creds['linkout_db'], new_pubmed_items)
+        total_enqueued = add_new_items_to_logging_db(new_pubmed_items)
     else:
         print("No new pmid publications in eScholarship. Exiting.")
         exit(1)
@@ -44,6 +29,7 @@ def main():
     print(f"Including the new items, {total_enqueued} total items are enqueued for submission.")
     if total_enqueued >= submission_threshold:
         print(f"Total enqueued items over the threshold ({submission_threshold}): Moving to submission step.\n")
+        import submit_new_pubmed_items
         submit_new_pubmed_items.main()
     else:
         print(f"Total enqueued items under the submission threshold ({submission_threshold}): Exiting.")
@@ -51,8 +37,9 @@ def main():
 
 
 # =========================
-def get_previous_pubmed_submissions(tools_rds):
-    mysql_conn = pub_oapi_tools_db.get_connection(tools_rds)
+def get_previous_pubmed_submissions():
+    mysql_conn = pub_oapi_tools_db.get_connection(
+        env=pub_oapi_tools_env, database=pub_oapi_tools_db_name)
 
     # Get the Item IDs already submitted
     with mysql_conn.cursor() as cursor:
@@ -66,9 +53,9 @@ def get_previous_pubmed_submissions(tools_rds):
 
 
 # Connects to Elements DB, create temp table w/ linkout IDs, get new pubs
-def get_new_pmid_pubs(elements_reporting_db, submitted_ids):
+def get_new_pmid_pubs(submitted_ids):
+    mssql_conn = ucpms_db.get_connection(env=ucpms_db_env)
 
-    mssql_conn = ucpms_db.get_connection(elements_reporting_db)
     with mssql_conn.cursor() as cursor:
         print("Creating temp table with submitted IDs.")
         cursor.execute("CREATE TABLE #linkout_ids (id varchar(16) COLLATE Latin1_General_CI_AS)")
@@ -114,8 +101,9 @@ def get_new_pmid_pubs(elements_reporting_db, submitted_ids):
     return new_eschol_pubmed_items
 
 
-def add_new_items_to_logging_db(tools_rds, new_eschol_pubmed_items):
-    mysql_conn = pub_oapi_tools_db.get_connection(tools_rds)
+def add_new_items_to_logging_db(new_eschol_pubmed_items):
+    mysql_conn = pub_oapi_tools_db.get_connection(
+        env=pub_oapi_tools_env, database=pub_oapi_tools_db_name)
 
     # Get the Item IDs already submitted
     print(f"Adding {len(new_eschol_pubmed_items)} new items to the pmid logging db.")
