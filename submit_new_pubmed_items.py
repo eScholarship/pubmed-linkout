@@ -1,4 +1,9 @@
-from pub_oapi_tools_common import parameter_store_connect
+# LinkOut submission documentation
+# https://www.ncbi.nlm.nih.gov/books/NBK3812/
+
+from pub_oapi_tools_common import aws_lambda
+from pub_oapi_toosl_common import pub_oapi_tools_db
+
 import datetime
 import pymysql
 import xml.etree.ElementTree as ET
@@ -20,17 +25,8 @@ creds = {
     }
 }
 
-creds = parameter_store_connect.get_parameters(creds)
-
-
-# =========================
-def get_logging_db_connection(linkout_db):
-    return pymysql.connect(
-        host=linkout_db['server'],
-        user=linkout_db['user'],
-        password=linkout_db['password'],
-        database=linkout_db['pubmed-linkout-db'],
-        cursorclass=pymysql.cursors.DictCursor)
+creds = aws_lambda.get_parameters(creds)
+creds['linkout_db']['database'] = creds['linkout_db']['pubmed-linkout-db']
 
 
 # =========================
@@ -65,7 +61,7 @@ def main():
 
 
 def get_new_items_for_submission(linkout_db):
-    mysql_conn = get_logging_db_connection(linkout_db)
+    mysql_conn = pub_oapi_tools_db.getconnection(linkout_db)
 
     print("Connected to logging DB. Getting new items for submission.")
     with mysql_conn.cursor() as cursor:
@@ -150,7 +146,7 @@ def upload_submission_file_to_ftp(ftp_creds, submission_file_with_path, submissi
 
 
 def update_logging_db(linkout_db, submission_file):
-    mysql_conn = get_logging_db_connection(linkout_db)
+    mysql_conn = pub_oapi_tools_db.get_connection(linkout_db)
 
     print("Connected to logging DB. Updating submitted items.")
     with mysql_conn.cursor() as cursor:
@@ -165,12 +161,19 @@ def update_logging_db(linkout_db, submission_file):
     mysql_conn.close()
 
 
+# Set up the mail process with attachment and email recipients
 def send_notification_email(emails, submission_file, new_item_count):
-    # Set up the mail process with attachment and email recipients
     subprocess_setup = ['mail', '-s', 'New UC eScholarship .xml file added to linkout FTP']
     subprocess_setup += [emails['devin'], emails['oapolicy-help']]
+    input_byte_string = get_email_body_text(submission_file, new_item_count)
 
-    input_byte_string = b'''
+    # Run the subprocess
+    subprocess.run(subprocess_setup, input=input_byte_string, capture_output=True)
+
+
+# Split off into its own function bc of the weird formatting
+def get_email_body_text(submission_file, new_item_count):
+    return(b'''
 Hello Pubmed,
 
 An .xml file containing new publications for LinkOut has been added to our "holdings" folder on the FTP:
@@ -182,11 +185,7 @@ Thank you!
 
 
 Future-proofing Note:
-This automated message is sent from the pubmed-linkout tool: https://github.com/eScholarship/pubmed-linkout 
-'''
-
-    # Run the subprocess
-    subprocess.run(subprocess_setup, input=input_byte_string, capture_output=True)
+This automated message is sent from the pubmed-linkout tool: https://github.com/eScholarship/pubmed-linkout ''')
 
 
 # =========================

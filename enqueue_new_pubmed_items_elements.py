@@ -1,9 +1,9 @@
 # LinkOut submission documentation
 # https://www.ncbi.nlm.nih.gov/books/NBK3812/
 
-from pub_oapi_tools_common import parameter_store_connect
-import pymysql
-import pyodbc
+from pub_oapi_tools_common import aws_lambda
+from pub_oapi_tools_common import ucpms_db
+from pub_oapi_toosl_common import pub_oapi_tools_db
 import submit_new_pubmed_items
 
 submission_threshold = 250
@@ -20,30 +20,8 @@ creds = {
         'names': ['server', 'pubmed-linkout-db', 'user', 'password']}
 }
 
-creds = parameter_store_connect.get_parameters(creds)
-
-
-# =========================
-# Get Connections
-def get_logging_db_connection(linkout_db):
-    return pymysql.connect(
-        host=linkout_db['server'],
-        user=linkout_db['user'],
-        password=linkout_db['password'],
-        database=linkout_db['pubmed-linkout-db'],
-        cursorclass=pymysql.cursors.DictCursor)
-
-
-def get_elements_report_db_connection(elements_db):
-    mssql_conn = pyodbc.connect(
-        driver=elements_db['driver'],
-        server=(elements_db['server'] + ',1433'),
-        database=elements_db['database'],
-        uid=elements_db['user'],
-        pwd=elements_db['password'],
-        trustservercertificate='yes')
-    mssql_conn.autocommit = True  # Required when queries use TRANSACTION
-    return mssql_conn
+creds = aws_lambda.get_parameters(creds)
+creds['linkout_db']['database'] = creds['linkout_db']['pubmed-linkout-db']
 
 
 # =========================
@@ -52,7 +30,7 @@ def main():
     # Get the pubs we've already submitted - returns a list of eschol_ids.
     submitted_ids = get_previous_pubmed_submissions(creds['linkout_db'])
 
-    # Get newly-added eSchol pubmed items;
+    # Get newly-added eSchol pubmed items
     # Add them to the logging db
     # Check the total number of enqueued items
     new_pubmed_items = get_new_pmid_pubs(creds['elements_db'], submitted_ids)
@@ -73,7 +51,7 @@ def main():
 
 # =========================
 def get_previous_pubmed_submissions(tools_rds):
-    mysql_conn = get_logging_db_connection(tools_rds)
+    mysql_conn = pub_oapi_tools_db.get_connection(tools_rds)
 
     # Get the Item IDs already submitted
     with mysql_conn.cursor() as cursor:
@@ -86,13 +64,11 @@ def get_previous_pubmed_submissions(tools_rds):
     return submitted_ids
 
 
+# Connects to Elements DB, create temp table w/ linkout IDs, get new pubs
 def get_new_pmid_pubs(elements_reporting_db, submitted_ids):
 
-    # connect to the mySql db
-    mssql_conn = get_elements_report_db_connection(elements_reporting_db)
+    mssql_conn = ucpms_db.get_connection(elements_reporting_db)
     with mssql_conn.cursor() as cursor:
-        print("Connected to Elements Reporting DB.")
-
         print("Creating temp table with submitted IDs.")
         cursor.execute("CREATE TABLE #linkout_ids (id varchar(16) COLLATE Latin1_General_CI_AS)")
         temp_table_insert = "INSERT INTO #linkout_ids (id) VALUES (?)"
@@ -138,7 +114,7 @@ def get_new_pmid_pubs(elements_reporting_db, submitted_ids):
 
 
 def add_new_items_to_logging_db(tools_rds, new_eschol_pubmed_items):
-    mysql_conn = get_logging_db_connection(tools_rds)
+    mysql_conn = pub_oapi_tools_db.get_connection(tools_rds)
 
     # Get the Item IDs already submitted
     print(f"Adding {len(new_eschol_pubmed_items)} new items to the pmid logging db.")
