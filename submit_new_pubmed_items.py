@@ -9,13 +9,11 @@ import xml.etree.ElementTree as ET
 from ftplib import FTP
 import subprocess
 
+pub_oapi_tools_env = "prod"
+pub_oapi_tools_db_name = "pubmed-linkout-db"
 
 # =========================
 creds = {
-    'linkout_db': {
-        'folder': 'pub-oapi-tools/tools-rds',
-        'env': 'prod',
-        'names': ['server', 'pubmed-linkout-db', 'user', 'password']},
     'pubmed_ftp': {
         'folder': 'pub-oapi-tools/pubmed-linkout-ftp'},
     'emails': {
@@ -23,9 +21,7 @@ creds = {
         'names': ['devin', 'oapolicy-help']
     }
 }
-
 creds = aws_lambda.get_parameters(creds)
-creds['linkout_db']['database'] = creds['linkout_db']['pubmed-linkout-db']
 
 
 # =========================
@@ -41,7 +37,7 @@ def main():
     submission_file = f"{run_date}_eschol_linkout_resource.xml"
 
     # Get the new items enqueued for submission
-    new_items = get_new_items_for_submission(creds['linkout_db'])
+    new_items = get_new_items_for_submission()
     new_item_count = len(new_items)
 
     # Create the XML file
@@ -51,7 +47,7 @@ def main():
     upload_submission_file_to_ftp(creds['pubmed_ftp'], submission_file_with_path, submission_file)
 
     # Update the logging DB
-    update_logging_db(creds['linkout_db'], submission_file)
+    update_logging_db(submission_file)
 
     # Email stakeholders
     send_notification_email(creds['emails'], submission_file, new_item_count)
@@ -59,8 +55,9 @@ def main():
     print("Program complete. Exiting.")
 
 
-def get_new_items_for_submission(linkout_db):
-    mysql_conn = pub_oapi_tools_db.getconnection(linkout_db)
+def get_new_items_for_submission():
+    mysql_conn = pub_oapi_tools_db.getconnection(
+        env=pub_oapi_tools_env, database=pub_oapi_tools_db_name)
 
     print("Connected to logging DB. Getting new items for submission.")
     with mysql_conn.cursor() as cursor:
@@ -144,8 +141,9 @@ def upload_submission_file_to_ftp(ftp_creds, submission_file_with_path, submissi
     ftp.quit()
 
 
-def update_logging_db(linkout_db, submission_file):
-    mysql_conn = pub_oapi_tools_db.get_connection(linkout_db)
+def update_logging_db(submission_file):
+    mysql_conn = pub_oapi_tools_db.getconnection(
+        env=pub_oapi_tools_env, database=pub_oapi_tools_db_name)
 
     print("Connected to logging DB. Updating submitted items.")
     with mysql_conn.cursor() as cursor:
